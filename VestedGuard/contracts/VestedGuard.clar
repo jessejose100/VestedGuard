@@ -126,4 +126,47 @@
     )
 )
 
+;; Time-Release Token Distribution Feature
+;; Functions for creating and managing vesting schedules, allowing for time-based token distribution.
+(define-public (create-vesting (recipient principal) (start-block uint) (end-block uint) (total-amount uint))
+  (begin
+    (asserts! (is-owner tx-sender) ERR-NOT-OWNER)
+    (asserts! (> end-block start-block) ERR-INVALID-AMOUNT)
+    (asserts! (>= (get-balance CONTRACT-OWNER) total-amount) ERR-INSUFFICIENT-BALANCE)
+    (map-set vesting-schedules { vesting-id: (var-get next-vesting-id) } { recipient: recipient, start-block: start-block, end-block: end-block, total-amount: total-amount, claimed-amount: u0 })
+    (map-set balances { owner: CONTRACT-OWNER } { amount: (- (get-balance CONTRACT-OWNER) total-amount) })
+    (var-set next-vesting-id (+ (var-get next-vesting-id) u1))
+    (ok true)
+  )
+)
+
+(define-public (claim-vested-tokens (vesting-id uint))
+  (let (
+      (vesting (map-get? vesting-schedules { vesting-id: vesting-id }))
+      (current-block block-height)
+    )
+    (asserts! (is-some vesting) ERR-VESTING-NOT-FOUND)
+    (let (
+        (vesting-data (unwrap! vesting ERR-VESTING-NOT-FOUND))
+        (recipient (get recipient vesting-data))
+        (start-block (get start-block vesting-data))
+        (end-block (get end-block vesting-data))
+        (total-amount (get total-amount vesting-data))
+        (claimed-amount (get claimed-amount vesting-data))
+      )
+      (asserts! (>= current-block start-block) ERR-VESTING-NOT-STARTED)
+      (asserts! (<= current-block end-block) ERR-VESTING-COMPLETED)
+      (let (
+          (calculated-amount (* (/ (- current-block start-block) (- end-block start-block)) total-amount))
+          (eligible-amount (if (<= calculated-amount total-amount) calculated-amount total-amount))
+          (amount-to-claim (- eligible-amount claimed-amount))
+        )
+        (asserts! (> amount-to-claim u0) ERR-INVALID-AMOUNT)
+        (map-set balances { owner: recipient } { amount: (+ (get-balance recipient) amount-to-claim) })
+        (map-set vesting-schedules { vesting-id: vesting-id } { recipient: recipient, start-block: start-block, end-block: end-block, total-amount: total-amount, claimed-amount: eligible-amount })
+        (ok true)
+      )
+    )
+  )
+)
 
